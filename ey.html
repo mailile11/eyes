@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GazeTrack Studio - Fixed WebGazer Eye Tracking</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- WebGazer.js with automatic fallback loader -->
+    <script id="webgazer-cdn" src="https://webgazer.cs.brown.edu/webgazer.js"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        cyber: {
+                            bg: '#0a0d14',
+                            card: '#121824',
+                            accent: '#00f0ff',
+                            purple: '#7000ff',
+                            pink: '#ff007f',
+                            success: '#00ff66',
+                            warning: '#ffb703'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0a0d14;
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+
+        .code-font {
+            font-family: 'Fira Code', monospace;
+        }
+
+        /* Glowing Effects */
+        .glow-accent {
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.35);
+        }
+        .glow-pink {
+            box-shadow: 0 0 20px rgba(255, 0, 127, 0.4);
+        }
+        .glow-green {
+            box-shadow: 0 0 20px rgba(0, 255, 102, 0.4);
+        }
+
+        /* Custom gaze pointer transition */
+        #gaze-pointer {
+            pointer-events: none;
+            transition: transform 0.05s linear;
+            will-change: transform;
+            z-index: 9999;
+        }
+
+        /* Override WebGazer Video Feed UI Position & Visibility */
+        #webgazerVideoContainer {
+            top: 80px !important;
+            right: 20px !important;
+            left: auto !important;
+            width: 240px !important;
+            height: 180px !important;
+            border-radius: 12px !important;
+            border: 2px solid #00f0ff !important;
+            box-shadow: 0 0 25px rgba(0, 240, 255, 0.4) !important;
+            overflow: hidden !important;
+            z-index: 40 !important;
+            background: #121824 !important;
+        }
+
+        #webgazerVideoFeed, #webgazerFaceOverlay, #webgazerFaceFeedbackBox {
+            width: 240px !important;
+            height: 180px !important;
+            border-radius: 10px !important;
+        }
+
+        #webgazerGazeDot {
+            z-index: 9998 !important;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0a0d14;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #00f0ff;
+        }
+
+        /* Target pulse animation */
+        @keyframes targetPulse {
+            0% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.15); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.9; }
+        }
+        .animate-target {
+            animation: targetPulse 1.8s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-cyber-accent selection:text-black">
+
+    <!-- TOP HEADER / NAV -->
+    <header class="border-b border-slate-800 bg-cyber-card/80 backdrop-blur-md sticky top-0 z-30 px-6 py-3 flex justify-between items-center">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyber-accent to-cyber-purple flex items-center justify-center text-black font-bold shadow-lg">
+                <i class="fa-solid fa-eye text-lg"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-wider text-white flex items-center gap-2">
+                    GazeTrack Studio <span class="text-xs px-2 py-0.5 rounded bg-cyber-accent/10 text-cyber-accent border border-cyber-accent/30 code-font">PRO v3.0</span>
+                </h1>
+                <p class="text-xs text-slate-400">Eye Tracking Engine with Diagnostic Real-time Tracking Fix</p>
+            </div>
+        </div>
+
+        <!-- Action Header Controls -->
+        <div class="flex items-center space-x-3">
+            <!-- Camera Status Badge -->
+            <div id="cam-status-badge" class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-400">
+                <span class="w-2.5 h-2.5 rounded-full bg-slate-600" id="cam-status-dot"></span>
+                <span id="cam-status-text">Cam: Uninitialized</span>
+            </div>
+
+            <!-- Start / Stop Tracking Button -->
+            <button id="btn-toggle-tracking" onclick="toggleTracking()" class="px-5 py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center gap-2 bg-cyber-accent text-black hover:bg-cyan-300 glow-accent cursor-pointer">
+                <i class="fa-solid fa-power-off" id="icon-btn-start"></i>
+                <span id="txt-tracking">Start Eye Tracking Engine</span>
+            </button>
+
+            <!-- Calibration Button -->
+            <button onclick="startCalibrationWorkflow()" class="px-4 py-2.5 rounded-xl font-semibold text-sm bg-slate-800 hover:bg-slate-700 text-slate-200 transition border border-slate-700 flex items-center gap-2 cursor-pointer">
+                <i class="fa-solid fa-crosshairs text-cyber-pink"></i>
+                <span>Calibrate (9-Point)</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- STEP-BY-STEP INSTRUCTION BAR -->
+    <section class="bg-slate-900/60 border-b border-slate-800/80 px-6 py-2.5">
+        <div class="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-2 text-slate-300 font-medium">
+                <i class="fa-solid fa-list-check text-cyber-accent"></i>
+                <span>Quickstart Workflow:</span>
+            </div>
+            <div class="flex items-center gap-6 text-slate-400">
+                <span class="flex items-center gap-1.5"><strong class="text-cyber-accent">1.</strong> Click Start Engine</span>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-600"></i>
+                <span class="flex items-center gap-1.5"><strong class="text-cyber-accent">2.</strong> Center Face in Camera Box</span>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-600"></i>
+                <span class="flex items-center gap-1.5"><strong class="text-cyber-accent">3.</strong> Click 9-Point Calibration</span>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-600"></i>
+                <span class="flex items-center gap-1.5"><strong class="text-cyber-accent">4.</strong> Test Target Arena</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- MAIN APP CONTENT -->
+    <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1600px] mx-auto w-full">
+
+        <!-- LEFT CONTROL PANEL (4 Cols) -->
+        <section class="lg:col-span-4 space-y-6">
+
+            <!-- FACE DETECTION STATUS WARNING BANNER -->
+            <div id="face-alert-box" class="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs leading-relaxed flex items-center gap-3 shadow-md">
+                <i class="fa-solid fa-face-frown text-amber-400 text-xl flex-shrink-0"></i>
+                <div id="face-alert-text">
+                    <strong>Engine Offline:</strong> Click "Start Eye Tracking Engine" to request camera permission and initialize WebGazer data stream.
+                </div>
+            </div>
+
+            <!-- DIAGNOSTIC LOG & PACKET COUNTER -->
+            <div class="bg-cyber-card border border-slate-800 rounded-xl p-5 shadow-xl space-y-3">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                    <h2 class="text-sm font-bold uppercase text-cyber-accent tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-bug"></i> Real-time Diagnostics
+                    </h2>
+                    <span id="data-packet-counter" class="text-[10px] px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800 code-font">0 Packets</span>
+                </div>
+
+                <div class="space-y-2 text-xs code-font">
+                    <div class="flex justify-between py-1 border-b border-slate-800/50">
+                        <span class="text-slate-400">Library Status:</span>
+                        <span id="diag-lib-status" class="text-amber-400">Loading Script...</span>
+                    </div>
+                    <div class="flex justify-between py-1 border-b border-slate-800/50">
+                        <span class="text-slate-400">Cam Stream Active:</span>
+                        <span id="diag-cam-stream" class="text-slate-500">False</span>
+                    </div>
+                    <div class="flex justify-between py-1 border-b border-slate-800/50">
+                        <span class="text-slate-400">Face Detected:</span>
+                        <span id="diag-face-detect" class="text-slate-500">False</span>
+                    </div>
+                    <div class="flex justify-between py-1">
+                        <span class="text-slate-400">Data Stream Rate:</span>
+                        <span id="diag-data-rate" class="text-slate-500">0 Hz</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 text-[11px] text-slate-400 code-font h-20 overflow-y-auto" id="diag-console-log">
+                    [System] WebGazer initializer standing by...
+                </div>
+            </div>
+
+            <!-- CAMERA OFFSET & GEOMETRY SETTINGS -->
+            <div class="bg-cyber-card border border-slate-800 rounded-xl p-5 shadow-xl space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <h2 class="text-sm font-bold uppercase text-cyber-accent tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-sliders"></i> Top-Camera Pitch & Offsets
+                    </h2>
+                    <button onclick="resetOffsetSettings()" class="text-xs text-slate-400 hover:text-cyber-accent transition">
+                        <i class="fa-solid fa-rotate-left mr-1"></i>Reset
+                    </button>
+                </div>
+
+                <p class="text-xs text-slate-400">
+                    Adjust controls to compensate for webcams placed <strong>above/over monitor screens</strong>.
+                </p>
+
+                <!-- Vertical Offset Slider (Y) -->
+                <div class="space-y-1">
+                    <div class="flex justify-between text-xs">
+                        <label class="text-slate-300 font-medium">Vertical Pitch Offset (Y)</label>
+                        <span id="val-offset-y" class="code-font text-cyber-accent font-semibold">0 px</span>
+                    </div>
+                    <input type="range" id="slider-offset-y" min="-350" max="350" value="0" step="2" oninput="updateSettings()" class="w-full accent-cyber-accent bg-slate-800 rounded-lg h-2 cursor-pointer">
+                    <span class="text-[10px] text-slate-500 block">Compensates for camera elevated above eye level.</span>
+                </div>
+
+                <!-- Horizontal Offset Slider (X) -->
+                <div class="space-y-1">
+                    <div class="flex justify-between text-xs">
+                        <label class="text-slate-300 font-medium">Horizontal Offset (X)</label>
+                        <span id="val-offset-x" class="code-font text-cyber-accent font-semibold">0 px</span>
+                    </div>
+                    <input type="range" id="slider-offset-x" min="-250" max="250" value="0" step="2" oninput="updateSettings()" class="w-full accent-cyber-accent bg-slate-800 rounded-lg h-2 cursor-pointer">
+                </div>
+
+                <!-- Vertical Sensitivity / Scale Y -->
+                <div class="space-y-1">
+                    <div class="flex justify-between text-xs">
+                        <label class="text-slate-300 font-medium">Vertical Stretch (Scale Y)</label>
+                        <span id="val-scale-y" class="code-font text-cyber-accent font-semibold">1.00x</span>
+                    </div>
+                    <input type="range" id="slider-scale-y" min="0.4" max="2.8" value="1.0" step="0.05" oninput="updateSettings()" class="w-full accent-cyber-accent bg-slate-800 rounded-lg h-2 cursor-pointer">
+                </div>
+
+                <!-- Horizontal Sensitivity / Scale X -->
+                <div class="space-y-1">
+                    <div class="flex justify-between text-xs">
+                        <label class="text-slate-300 font-medium">Horizontal Stretch (Scale X)</label>
+                        <span id="val-scale-x" class="code-font text-cyber-accent font-semibold">1.00x</span>
+                    </div>
+                    <input type="range" id="slider-scale-x" min="0.4" max="2.8" value="1.0" step="0.05" oninput="updateSettings()" class="w-full accent-cyber-accent bg-slate-800 rounded-lg h-2 cursor-pointer">
+                </div>
+
+                <!-- Smoothing Filter -->
+                <div class="space-y-1">
+                    <div class="flex justify-between text-xs">
+                        <label class="text-slate-300 font-medium">Gaze Damping / Smoothing</label>
+                        <span id="val-smoothing" class="code-font text-cyber-accent font-semibold">0.25</span>
+                    </div>
+                    <input type="range" id="slider-smoothing" min="0.05" max="0.8" value="0.25" step="0.05" oninput="updateSettings()" class="w-full accent-cyber-accent bg-slate-800 rounded-lg h-2 cursor-pointer">
+                </div>
+            </div>
+
+            <!-- VISUAL OVERLAY CONTROLS -->
+            <div class="bg-cyber-card border border-slate-800 rounded-xl p-5 shadow-xl space-y-3">
+                <h2 class="text-sm font-bold uppercase text-slate-200 tracking-wider flex items-center gap-2 border-b border-slate-800 pb-3">
+                    <i class="fa-solid fa-eye-slash"></i> Overlay & Preview Toggles
+                </h2>
+
+                <label class="flex items-center justify-between cursor-pointer">
+                    <span class="text-xs font-medium text-slate-300">Show WebGazer Red Prediction Dot</span>
+                    <input type="checkbox" id="chk-show-native-dot" checked onchange="toggleNativeDot(this.checked)" class="w-4 h-4 rounded accent-cyber-accent bg-slate-800">
+                </label>
+
+                <label class="flex items-center justify-between cursor-pointer">
+                    <span class="text-xs font-medium text-slate-300">Show Camera Video Preview Box</span>
+                    <input type="checkbox" id="chk-show-video" checked onchange="toggleVideoFeed(this.checked)" class="w-4 h-4 rounded accent-cyber-accent bg-slate-800">
+                </label>
+
+                <label class="flex items-center justify-between cursor-pointer">
+                    <span class="text-xs font-medium text-slate-300">Show Custom Reticle Pointer</span>
+                    <input type="checkbox" id="chk-show-pointer" checked onchange="updateSettings()" class="w-4 h-4 rounded accent-cyber-accent bg-slate-800">
+                </label>
+            </div>
+        </section>
+
+        <!-- RIGHT DISPLAY ARENA & GAZE TARGET TEST (8 Cols) -->
+        <section class="lg:col-span-8 flex flex-col space-y-6">
+
+            <!-- INTERACTIVE TEST ARENA -->
+            <div class="relative bg-cyber-card border border-slate-800 rounded-2xl p-6 shadow-2xl flex-1 min-h-[480px] flex flex-col justify-between overflow-hidden group">
+                <div class="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-40 pointer-events-none"></div>
+
+                <!-- Arena Header -->
+                <div class="relative z-10 flex justify-between items-center border-b border-slate-800/80 pb-4">
+                    <div>
+                        <h2 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-bullseye text-cyber-pink"></i> Interactive Gaze & Dwell Arena
+                        </h2>
+                        <p class="text-xs text-slate-400">Look at target spheres to test eye-gaze movement accuracy.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div class="text-xs bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800 code-font">
+                            Score: <span id="txt-score" class="text-cyber-accent font-bold text-sm">0</span>
+                        </div>
+                        <button onclick="resetTargetTest()" class="text-xs px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition">
+                            Reset Score
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Dynamic Target Container -->
+                <div id="target-arena" class="relative flex-1 my-4 flex items-center justify-center">
+                    <div id="active-target" onclick="hitTarget()" class="absolute cursor-pointer animate-target w-16 h-16 rounded-full bg-gradient-to-br from-cyber-pink to-cyber-purple flex items-center justify-center border-2 border-white/40 shadow-lg glow-pink transition-all duration-300">
+                        <i class="fa-solid fa-crosshairs text-white text-xl"></i>
+                    </div>
+                </div>
+
+                <!-- Dwell Button Test Bar -->
+                <div class="relative z-10 border-t border-slate-800/80 pt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <button id="dwell-btn-1" class="dwell-target relative overflow-hidden py-3.5 px-4 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 text-center transition hover:border-cyber-accent">
+                        <span class="relative z-10">Look Here (Dwell Button A)</span>
+                        <div class="dwell-progress absolute inset-0 bg-cyber-accent/30 w-0 transition-all duration-75"></div>
+                    </button>
+                    <button id="dwell-btn-2" class="dwell-target relative overflow-hidden py-3.5 px-4 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 text-center transition hover:border-cyber-purple">
+                        <span class="relative z-10">Look Here (Dwell Button B)</span>
+                        <div class="dwell-progress absolute inset-0 bg-cyber-purple/40 w-0 transition-all duration-75"></div>
+                    </button>
+                    <button id="dwell-btn-3" class="dwell-target relative overflow-hidden py-3.5 px-4 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 text-center transition hover:border-cyber-pink">
+                        <span class="relative z-10">Look Here (Dwell Button C)</span>
+                        <div class="dwell-progress absolute inset-0 bg-cyber-pink/40 w-0 transition-all duration-75"></div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- REALTIME GAZE COORDINATE DASHBOARD -->
+            <div class="bg-cyber-card border border-slate-800 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 code-font text-xs">
+                <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800/80">
+                    <span class="text-slate-500 block text-[10px]">RAW WEBGHAZER (X, Y)</span>
+                    <span id="coord-raw" class="text-slate-300 font-semibold">0, 0</span>
+                </div>
+                <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800/80">
+                    <span class="text-slate-500 block text-[10px]">OFFSET CORRECTED (X, Y)</span>
+                    <span id="coord-corrected" class="text-cyber-accent font-semibold">0, 0</span>
+                </div>
+                <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800/80">
+                    <span class="text-slate-500 block text-[10px]">TRACKER STATUS</span>
+                    <span id="status-tracker" class="text-amber-400 font-semibold">Standby</span>
+                </div>
+                <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800/80">
+                    <span class="text-slate-500 block text-[10px]">CAMERA STREAM FPS</span>
+                    <span id="stat-fps" class="text-cyber-success font-semibold">-- FPS</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- CUSTOM GAZE POINTER / RETICLE -->
+    <div id="gaze-pointer" class="fixed top-0 left-0 w-8 h-8 rounded-full pointer-events-none transform -translate-x-1/2 -translate-y-1/2 flex items-center justify-center transition-opacity duration-300 opacity-0">
+        <div id="pointer-neon-dot" class="w-6 h-6 rounded-full bg-cyber-accent/80 border-2 border-white shadow-[0_0_20px_#00f0ff]"></div>
+    </div>
+
+    <!-- CALIBRATION OVERLAY MODAL -->
+    <div id="calibration-overlay" class="fixed inset-0 bg-cyber-bg/95 backdrop-blur-xl z-50 hidden flex flex-col justify-between p-8">
+        <div class="flex justify-between items-start">
+            <div>
+                <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-crosshairs text-cyber-accent"></i> 9-Point Camera Calibration Workflow
+                </h2>
+                <p class="text-sm text-slate-400 mt-1">
+                    Click each numbered point <strong>5 times</strong> while staring directly at the center of that point.
+                </p>
+            </div>
+            <button onclick="stopCalibrationWorkflow()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg border border-slate-700">
+                Exit Calibration
+            </button>
+        </div>
+
+        <!-- Calibration Grid Container -->
+        <div class="relative flex-1 my-6 rounded-2xl border border-slate-800/80 bg-slate-900/40">
+            <button class="calib-pt absolute top-8 left-8" data-pt="1"></button>
+            <button class="calib-pt absolute top-8 left-1/2 -translate-x-1/2" data-pt="2"></button>
+            <button class="calib-pt absolute top-8 right-8" data-pt="3"></button>
+
+            <button class="calib-pt absolute top-1/2 left-8 -translate-y-1/2" data-pt="4"></button>
+            <button class="calib-pt absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" data-pt="5"></button>
+            <button class="calib-pt absolute top-1/2 right-8 -translate-y-1/2" data-pt="6"></button>
+
+            <button class="calib-pt absolute bottom-8 left-8" data-pt="7"></button>
+            <button class="calib-pt absolute bottom-8 left-1/2 -translate-x-1/2" data-pt="8"></button>
+            <button class="calib-pt absolute bottom-8 right-8" data-pt="9"></button>
+
+            <div class="absolute top-1/3 left-1/2 -translate-x-1/2 text-center pointer-events-none">
+                <div id="calib-status-text" class="text-lg font-bold text-cyber-accent mb-2">Click Point 1 to start</div>
+                <div class="w-64 bg-slate-800 h-2 rounded-full mx-auto overflow-hidden">
+                    <div id="calib-progress-bar" class="bg-gradient-to-r from-cyber-accent to-cyber-pink h-full w-0 transition-all duration-200"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center text-xs text-slate-500">
+            Keep head still while focusing on calibration markers.
+        </div>
+    </div>
+
+    <!-- NOTIFICATION TOAST -->
+    <div id="toast" class="fixed bottom-6 right-6 z-50 bg-cyber-card border border-cyber-accent/40 text-white px-5 py-3 rounded-xl shadow-2xl transition-all duration-300 transform translate-y-20 opacity-0 flex items-center gap-3">
+        <i id="toast-icon" class="fa-solid fa-circle-info text-cyber-accent"></i>
+        <span id="toast-msg" class="text-xs font-medium">Notification message</span>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // State Machine
+        let isTracking = false;
+        let packetCount = 0;
+        let lastPacketTime = performance.now();
+        let packetsPerSec = 0;
+        let nullDataCounter = 0;
+
+        let gazeX = window.innerWidth / 2;
+        let gazeY = window.innerHeight / 2;
+        let rawGazeX = 0;
+        let rawGazeY = 0;
+
+        // Offset & Tuning Config
+        let config = {
+            offsetY: 0,
+            offsetX: 0,
+            scaleY: 1.0,
+            scaleX: 1.0,
+            smoothing: 0.25,
+            showPointer: true
+        };
+
+        // DOM Element Cache
+        const gazePointer = document.getElementById('gaze-pointer');
+        const coordRaw = document.getElementById('coord-raw');
+        const coordCorrected = document.getElementById('coord-corrected');
+        const statusTracker = document.getElementById('status-tracker');
+        const statFps = document.getElementById('stat-fps');
+        const diagConsole = document.getElementById('diag-console-log');
+
+        function logDiag(msg) {
+            console.log(`[GazeTrack] ${msg}`);
+            if (diagConsole) {
+                const time = new Date().toLocaleTimeString().split(' ')[0];
+                diagConsole.innerHTML = `<div>[${time}] ${msg}</div>` + diagConsole.innerHTML;
+            }
+        }
+
+        // Script Verification & Fallback Loader
+        window.addEventListener('load', () => {
+            initCalibrationButtons();
+            resetTargetPosition();
+
+            if (typeof webgazer !== 'undefined') {
+                document.getElementById('diag-lib-status').innerText = "Loaded (WebGazer 2.x)";
+                document.getElementById('diag-lib-status').className = "text-cyber-success font-semibold";
+                logDiag("WebGazer CDN script verified.");
+            } else {
+                logDiag("CDN script missing. Attempting secondary fallback load...");
+                const fallbackScript = document.createElement('script');
+                fallbackScript.src = "https://cdn.jsdelivr.net/npm/webgazer@2.1.0/dist/webgazer.js";
+                fallbackScript.onload = () => {
+                    document.getElementById('diag-lib-status').innerText = "Loaded via Fallback";
+                    document.getElementById('diag-lib-status').className = "text-cyber-success font-semibold";
+                    logDiag("WebGazer loaded successfully via fallback CDN.");
+                };
+                fallbackScript.onerror = () => {
+                    document.getElementById('diag-lib-status').innerText = "Load Failed";
+                    document.getElementById('diag-lib-status').className = "text-cyber-pink font-semibold";
+                    logDiag("CRITICAL: Failed to load WebGazer script library.");
+                };
+                document.head.appendChild(fallbackScript);
+            }
+        });
+
+        // Main WebGazer Toggle with Explicit Callback Chain
+        async function toggleTracking() {
+            if (typeof webgazer === 'undefined') {
+                showToast("WebGazer script is not loaded yet. Check connection.", "error");
+                return;
+            }
+
+            if (!isTracking) {
+                try {
+                    logDiag("Initializing WebGazer instance...");
+                    showToast("Requesting camera and initializing eye tracking...", "info");
+
+                    // 1. Explicit Regression / Tracker Setup
+                    webgazer.setRegression('ridge')
+                            .setTracker('clmtrackr');
+
+                    // 2. Attach Gaze Listener BEFORE starting
+                    webgazer.setGazeListener((data, clock) => {
+                        if (data == null) {
+                            nullDataCounter++;
+                            if (nullDataCounter > 15) {
+                                document.getElementById('diag-face-detect').innerText = "False (No Face)";
+                                document.getElementById('diag-face-detect').className = "text-amber-400 font-semibold";
+                                setFaceAlert("Face not detected in camera frame. Align your face inside the box on the top right.", true);
+                            }
+                            return;
+                        }
+
+                        // Face Detected Successfully
+                        nullDataCounter = 0;
+                        document.getElementById('diag-face-detect').innerText = "True (Active)";
+                        document.getElementById('diag-face-detect').className = "text-cyber-success font-semibold";
+                        setFaceAlert("Face detected & tracked! Looking around will move the reticle.", false);
+
+                        // Capture raw data
+                        rawGazeX = data.x;
+                        rawGazeY = data.y;
+
+                        // Increment Packet Diagnostics
+                        packetCount++;
+                        calculatePacketRate();
+
+                        // Apply Pitch/Offset Transformations
+                        const centerScreenX = window.innerWidth / 2;
+                        const centerScreenY = window.innerHeight / 2;
+
+                        let targetX = centerScreenX + (rawGazeX - centerScreenX) * config.scaleX + config.offsetX;
+                        let targetY = centerScreenY + (rawGazeY - centerScreenY) * config.scaleY + config.offsetY;
+
+                        // Exponential Damping
+                        gazeX += (targetX - gazeX) * config.smoothing;
+                        gazeY += (targetY - gazeY) * config.smoothing;
+
+                        // Render Pointer & Dwell Targets
+                        updatePointerPosition();
+                        checkDwellHover(gazeX, gazeY);
+                    });
+
+                    // 3. Boot WebGazer Engine
+                    await webgazer.begin();
+
+                    // 4. Configure Visual Overlays
+                    webgazer.showVideoPreview(document.getElementById('chk-show-video').checked)
+                            .showPredictionPoints(document.getElementById('chk-show-native-dot').checked);
+
+                    isTracking = true;
+
+                    // Update UI Controls
+                    document.getElementById('btn-toggle-tracking').className = "px-5 py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center gap-2 bg-red-500 text-white hover:bg-red-600 shadow-lg cursor-pointer";
+                    document.getElementById('txt-tracking').innerText = "Stop Eye Tracking Engine";
+                    document.getElementById('icon-btn-start').className = "fa-solid fa-circle-stop";
+
+                    document.getElementById('diag-cam-stream').innerText = "True (Active)";
+                    document.getElementById('diag-cam-stream').className = "text-cyber-success font-semibold";
+                    
+                    statusTracker.innerText = "Tracking Active";
+                    statusTracker.className = "text-cyber-success font-semibold";
+
+                    updatePermissionBadge(true);
+                    logDiag("WebGazer engine started successfully.");
+                    showToast("Eye tracking active! Move your eyes across the screen.", "success");
+
+                } catch (err) {
+                    console.error("WebGazer Init Exception:", err);
+                    logDiag(`Error: ${err.message || err}`);
+                    showToast(`Camera or WebGazer Error: ${err.message}`, "error");
+                    updatePermissionBadge(false);
+                }
+            } else {
+                // Pause / Stop Tracking
+                try {
+                    webgazer.end();
+                } catch(e) {}
+                
+                isTracking = false;
+
+                document.getElementById('btn-toggle-tracking').className = "px-5 py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center gap-2 bg-cyber-accent text-black hover:bg-cyan-300 glow-accent cursor-pointer";
+                document.getElementById('txt-tracking').innerText = "Start Eye Tracking Engine";
+                document.getElementById('icon-btn-start').className = "fa-solid fa-power-off";
+
+                document.getElementById('diag-cam-stream').innerText = "False";
+                document.getElementById('diag-cam-stream').className = "text-slate-500";
+                document.getElementById('diag-face-detect').innerText = "False";
+                document.getElementById('diag-face-detect').className = "text-slate-500";
+
+                statusTracker.innerText = "Stopped";
+                statusTracker.className = "text-amber-400 font-semibold";
+                gazePointer.style.opacity = '0';
+
+                setFaceAlert("Engine Stopped. Click Start Eye Tracking Engine to restart.", false);
+                logDiag("WebGazer engine stopped.");
+                showToast("Eye tracking engine paused.", "info");
+            }
+        }
+
+        function calculatePacketRate() {
+            const now = performance.now();
+            if (now - lastPacketTime >= 1000) {
+                packetsPerSec = packetCount;
+                packetCount = 0;
+                lastPacketTime = now;
+
+                document.getElementById('diag-data-rate').innerText = `${packetsPerSec} Hz`;
+                document.getElementById('data-packet-counter').innerText = `${packetsPerSec} Pkts/s`;
+                statFps.innerText = `${packetsPerSec} FPS`;
+            }
+        }
+
+        function setFaceAlert(text, isWarning) {
+            const alertBox = document.getElementById('face-alert-box');
+            const alertText = document.getElementById('face-alert-text');
+            alertText.innerHTML = text;
+
+            if (isWarning) {
+                alertBox.className = "p-4 rounded-xl bg-amber-500/20 border border-amber-500/50 text-amber-200 text-xs leading-relaxed flex items-center gap-3 shadow-md animate-pulse";
+            } else {
+                alertBox.className = "p-4 rounded-xl bg-cyber-card border border-slate-800 text-slate-300 text-xs leading-relaxed flex items-center gap-3 shadow-md";
+            }
+        }
+
+        function updatePermissionBadge(active) {
+            const dot = document.getElementById('cam-status-dot');
+            const text = document.getElementById('cam-status-text');
+            if (active) {
+                dot.className = "w-2.5 h-2.5 rounded-full bg-cyber-success animate-pulse";
+                text.innerText = "Cam: Active & Streaming";
+            } else {
+                dot.className = "w-2.5 h-2.5 rounded-full bg-amber-400";
+                text.innerText = "Cam: Standby";
+            }
+        }
+
+        function updatePointerPosition() {
+            if (config.showPointer) {
+                gazePointer.style.opacity = '1';
+                gazePointer.style.transform = `translate3d(${gazeX}px, ${gazeY}px, 0px) translate(-50%, -50%)`;
+            }
+
+            coordRaw.innerText = `${Math.round(rawGazeX)}, ${Math.round(rawGazeY)}`;
+            coordCorrected.innerText = `${Math.round(gazeX)}, ${Math.round(gazeY)}`;
+        }
+
+        function updateSettings() {
+            config.offsetY = parseInt(document.getElementById('slider-offset-y').value);
+            config.offsetX = parseInt(document.getElementById('slider-offset-x').value);
+            config.scaleY = parseFloat(document.getElementById('slider-scale-y').value);
+            config.scaleX = parseFloat(document.getElementById('slider-scale-x').value);
+            config.smoothing = parseFloat(document.getElementById('slider-smoothing').value);
+            config.showPointer = document.getElementById('chk-show-pointer').checked;
+
+            document.getElementById('val-offset-y').innerText = `${config.offsetY} px`;
+            document.getElementById('val-offset-x').innerText = `${config.offsetX} px`;
+            document.getElementById('val-scale-y').innerText = `${config.scaleY.toFixed(2)}x`;
+            document.getElementById('val-scale-x').innerText = `${config.scaleX.toFixed(2)}x`;
+            document.getElementById('val-smoothing').innerText = config.smoothing.toFixed(2);
+
+            gazePointer.style.opacity = (isTracking && config.showPointer) ? '1' : '0';
+        }
+
+        function resetOffsetSettings() {
+            document.getElementById('slider-offset-y').value = 0;
+            document.getElementById('slider-offset-x').value = 0;
+            document.getElementById('slider-scale-y').value = 1.0;
+            document.getElementById('slider-scale-x').value = 1.0;
+            document.getElementById('slider-smoothing').value = 0.25;
+            updateSettings();
+            showToast("Camera settings reset.", "info");
+        }
+
+        function toggleVideoFeed(show) {
+            if (window.webgazer) webgazer.showVideoPreview(show);
+        }
+
+        function toggleNativeDot(show) {
+            if (window.webgazer) webgazer.showPredictionPoints(show);
+        }
+
+        // --- CALIBRATION WORKFLOW ---
+        let calibClicks = {};
+        const TOTAL_POINTS = 9;
+        const CLICKS_PER_POINT = 5;
+
+        function initCalibrationButtons() {
+            const buttons = document.querySelectorAll('.calib-pt');
+            buttons.forEach((btn, index) => {
+                const ptId = index + 1;
+                calibClicks[ptId] = 0;
+                
+                btn.className = `calib-pt w-12 h-12 rounded-full bg-slate-800 border-2 border-cyber-accent text-cyber-accent font-bold text-sm flex items-center justify-center hover:scale-110 transition cursor-pointer shadow-[0_0_15px_rgba(0,240,255,0.3)]`;
+                btn.innerHTML = `<span>${ptId}</span>`;
+
+                btn.onclick = (e) => handleCalibClick(ptId, btn, e);
+            });
+        }
+
+        function startCalibrationWorkflow() {
+            if (!isTracking) {
+                showToast("Please click 'Start Eye Tracking Engine' first!", "error");
+                return;
+            }
+            document.getElementById('calibration-overlay').classList.remove('hidden');
+            if (window.webgazer) webgazer.clearData();
+            
+            for(let i=1; i<=TOTAL_POINTS; i++) calibClicks[i] = 0;
+            updateCalibProgress();
+        }
+
+        function stopCalibrationWorkflow() {
+            document.getElementById('calibration-overlay').classList.add('hidden');
+        }
+
+        function handleCalibClick(ptId, btn, event) {
+            calibClicks[ptId]++;
+            
+            if (window.webgazer) {
+                webgazer.recordScreenPosition(event.clientX, event.clientY, 'click');
+            }
+
+            if (calibClicks[ptId] >= CLICKS_PER_POINT) {
+                btn.classList.replace('bg-slate-800', 'bg-cyber-success');
+                btn.classList.replace('text-cyber-accent', 'text-black');
+                btn.innerHTML = `<i class="fa-solid fa-check"></i>`;
+            } else {
+                btn.classList.add('scale-125');
+                setTimeout(() => btn.classList.remove('scale-125'), 150);
+            }
+
+            updateCalibProgress();
+        }
+
+        function updateCalibProgress() {
+            let completedPoints = 0;
+            let totalClicksCount = 0;
+
+            for(let i=1; i<=TOTAL_POINTS; i++) {
+                if (calibClicks[i] >= CLICKS_PER_POINT) completedPoints++;
+                totalClicksCount += Math.min(calibClicks[i], CLICKS_PER_POINT);
+            }
+
+            const percent = (totalClicksCount / (TOTAL_POINTS * CLICKS_PER_POINT)) * 100;
+            document.getElementById('calib-progress-bar').style.width = `${percent}%`;
+
+            if (completedPoints === TOTAL_POINTS) {
+                document.getElementById('calib-status-text').innerText = "Calibration Complete!";
+                setTimeout(() => {
+                    stopCalibrationWorkflow();
+                    showToast("9-point gaze calibration matrix trained!", "success");
+                }, 1000);
+            } else {
+                document.getElementById('calib-status-text').innerText = `Calibrated ${completedPoints} / ${TOTAL_POINTS} Points`;
+            }
+        }
+
+        // --- TARGET GAME & GAZE DWELL LOGIC ---
+        let targetScore = 0;
+        let dwellTarget = null;
+        let dwellStartTime = null;
+        const DWELL_DURATION = 1000;
+
+        function hitTarget() {
+            targetScore += 10;
+            document.getElementById('txt-score').innerText = targetScore;
+            resetTargetPosition();
+            showToast("+10 Points! Target hit.", "success");
+        }
+
+        function resetTargetPosition() {
+            const arena = document.getElementById('target-arena');
+            const target = document.getElementById('active-target');
+            if (!arena || !target) return;
+
+            const arenaRect = arena.getBoundingClientRect();
+            const maxX = arenaRect.width - 80;
+            const maxY = arenaRect.height - 80;
+
+            const randomX = Math.max(20, Math.floor(Math.random() * maxX));
+            const randomY = Math.max(20, Math.floor(Math.random() * maxY));
+
+            target.style.left = `${randomX}px`;
+            target.style.top = `${randomY}px`;
+        }
+
+        function resetTargetTest() {
+            targetScore = 0;
+            document.getElementById('txt-score').innerText = '0';
+            resetTargetPosition();
+        }
+
+        function checkDwellHover(gx, gy) {
+            const dwellButtons = document.querySelectorAll('.dwell-target');
+            let hoveringAny = false;
+
+            dwellButtons.forEach(btn => {
+                const rect = btn.getBoundingClientRect();
+                const isHovered = (gx >= rect.left && gx <= rect.right && gy >= rect.top && gy <= rect.bottom);
+                const progressBar = btn.querySelector('.dwell-progress');
+
+                if (isHovered) {
+                    hoveringAny = true;
+                    if (dwellTarget !== btn) {
+                        dwellTarget = btn;
+                        dwellStartTime = performance.now();
+                    }
+
+                    const elapsed = performance.now() - dwellStartTime;
+                    const progressPercent = Math.min((elapsed / DWELL_DURATION) * 100, 100);
+                    if (progressBar) progressBar.style.width = `${progressPercent}%`;
+
+                    if (elapsed >= DWELL_DURATION) {
+                        btn.click();
+                        dwellStartTime = performance.now();
+                        showToast(`Dwell triggered: ${btn.innerText.trim()}`, "success");
+                    }
+                } else {
+                    if (dwellTarget === btn) {
+                        if (progressBar) progressBar.style.width = '0%';
+                    }
+                }
+            });
+
+            if (!hoveringAny) {
+                dwellTarget = null;
+                dwellStartTime = null;
+            }
+        }
+
+        function showToast(msg, type = "info") {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-msg');
+            const toastIcon = document.getElementById('toast-icon');
+
+            toastMsg.innerText = msg;
+
+            if (type === 'success') {
+                toastIcon.className = "fa-solid fa-circle-check text-cyber-success";
+            } else if (type === 'error') {
+                toastIcon.className = "fa-solid fa-circle-exclamation text-cyber-pink";
+            } else {
+                toastIcon.className = "fa-solid fa-circle-info text-cyber-accent";
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3200);
+        }
+    </script>
+</body>
+</html>
